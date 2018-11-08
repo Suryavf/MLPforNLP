@@ -7,11 +7,15 @@ Created on Tue Nov  6 15:51:50 2018
 """
 import numpy  as np
 import pandas as pd
+import re
+from nltk.corpus import stopwords
+from nltk.stem.porter import PorterStemmer
 
 print(chr(27) + "[2J")
 
 words = np.load('words.npy').item()
-
+stop = stopwords.words('english')
+porter = PorterStemmer()
 
 """
 Fun. stream documents
@@ -68,19 +72,15 @@ Features extraction
 -------------------
 """
 def featuresExtraction(text):
-    feature = np.zeros(300)
-    count = 0
+    feature = list()
     
     for w in text.split():
         if w in words:
-            feature += words[w]
-            count += 1
+            feature.append( words[w] )
     
-    if not count:
-        print("Esto es un problemas D:")
-        print(text)
-        
-    return feature/count
+    feature = np.array(feature)    
+    
+    return np.amax(feature, axis=0) 
 
 
 """
@@ -90,7 +90,6 @@ Generate features
 import pyprind
 pbar = pyprind.ProgBar(50)
 doc_stream = stream_docs(path='shuffled_movie_data.csv')
-
 
 print('\nGenerate Features')
 x = list()
@@ -138,9 +137,9 @@ Feedforward
 def feedforward(w, x):
     
     # Layers
-    z1 = np.multiply(         x   , w[0] )
-    z2 = np.multiply( sigmoid(z1) , w[1] )
-    z3 = np.multiply( sigmoid(z2) , w[2] )
+    z1 = np.dot( x[np.newaxis,:], w[0] )
+    z2 = np.dot( sigmoid(z1)    , w[1] )
+    z3 = np.dot( sigmoid(z2)    , w[2] )
 
     out = {"z1" : z1,
            "z2" : z2,
@@ -157,26 +156,26 @@ def backpropagation(w, x, y, z, learning_rate):
 
     w1 = w[0]; w2 = w[1]; w3 = w[2];
     
-    a1 = sigmoid(z["z1"])
-    a2 = sigmoid(z["z2"])
-    a3 = sigmoid(z["z3"])
+    a1 = sigmoid(z["z1"]).T
+    a2 = sigmoid(z["z2"]).T
+    a3 = sigmoid(z["z3"]).T
     
     # Layer 3
     mod_a3 = np.multiply( a3, 1-a3 )
     delta3 = np.multiply( a3 - y , mod_a3 )
-    gradW3 = np.dot(a2,delta3)
+    gradW3 = np.dot(a2,delta3.T)
     w3 = w3 - learning_rate*gradW3
     
     # Layer 2
     mod_a2 = np.multiply( a2, 1-a2 )
     delta2 = np.multiply( np.dot(w3,delta3) , mod_a2 )
-    gradW2 = np.dot(a1,delta2)
+    gradW2 = np.dot(a1,delta2.T)
     w2 = w2 - learning_rate*gradW2
     
     # Layer 1
     mod_a1 = np.multiply( a1, 1-a1 )
     delta1 = np.multiply( np.dot(w2,delta2) , mod_a1 )
-    gradW1 = np.dot(x[np.newaxis,:],delta1)
+    gradW1 = np.dot(x[:,np.newaxis],delta1.T)
     w1 = w1 - learning_rate*gradW1
     
     w[0] = w1; w[1] = w2; w[2] = w3;
@@ -188,21 +187,24 @@ def backpropagation(w, x, y, z, learning_rate):
 Multilayer Perceptron
 ---------------------
 """
-def MLP(x_train, y_train, num_iterations=20000, learning_rate=0.001,
-                          n_input=100, n_hidden=50):
+def MLP(x_train, y_train, num_iterations = 40000, 
+                          learning_rate  = 0.001,
+                          n_input  = 50, 
+                          n_hidden = 10):
     import random
     
     # Parameters
-    n_samples  = len(x_train)
+    n_samples  = len(x_train   )
+    n_features = len(x_train[0])
     
     # Inicialize
     w = list()
-    w.append( np.random.randn(n_samples+1,n_input )*np.sqrt(2/(n_samples+1+n_input )) )
-    w.append( np.random.randn(n_input    ,n_hidden)*np.sqrt(2/(n_input    +n_hidden)) )
-    w.append( np.random.randn(n_hidden   ,       1)*np.sqrt(2/(n_hidden   +       1)) )
+    w.append( np.random.randn(n_features+1,n_input )*np.sqrt(6/(n_features+1+n_input )) )
+    w.append( np.random.randn(n_input     ,n_hidden)*np.sqrt(6/(n_input     +n_hidden)) )
+    w.append( np.random.randn(n_hidden    ,       1)*np.sqrt(6/(n_hidden    +       1)) )
     
     # Train Loop
-    for _ in range(num_iterations):
+    for _ in range(n_samples):
         
         # Random selection
         n = round(random.uniform(0, n_samples-1))
@@ -221,13 +223,14 @@ def MLP(x_train, y_train, num_iterations=20000, learning_rate=0.001,
 Prediction
 ----------
 """
-def predict(w, x):
+def predict(w, x_test):
     
-    n_samples = len(x)
+    n_samples = len(x_test)
     y_pred    = list()
     
     for n in range(n_samples):
-        z = feedforward(w, x[n])
+        x = np.append([1], x_test[n])   # add bias
+        z = feedforward(w, x)
         a = sigmoid(z["z3"])
         y_pred.append( int(a>0.5) )
     
