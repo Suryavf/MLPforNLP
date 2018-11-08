@@ -14,8 +14,12 @@ from nltk.stem.porter import PorterStemmer
 print(chr(27) + "[2J")
 
 words = np.load('words.npy').item()
+Wvals = np.array([words[p] for p in words])
+
 stop = stopwords.words('english')
 porter = PorterStemmer()
+
+
 
 """
 Fun. stream documents
@@ -67,26 +71,55 @@ def get_minibatch(doc_stream, size):
 
 
 
+
+doc_stream = stream_docs(path='shuffled_movie_data.csv')
+x_, y_ = get_minibatch(doc_stream, size=50000)
+count_words = [len(preprocessing(w).split())  for w in x_]
+import seaborn as sns
+sns.distplot(count_words,bins=100)
+
+threshold = np.percentile(count_words,90)
+
+
+
+
+##  ---------------------------------------------------------------------------   
+
+
+
 """
 Features extraction
 -------------------
 """
 def featuresExtraction(text):
-    feature = list()
+    # Review to values
+    review = list()
+    count = 0
     
     for w in text.split():
         if w in words:
-            feature.append( words[w] )
+            review.append( words[w] )
+            count += 1
+        
+        if not count<threshold:
+            break
+            
+    while count<threshold:
+        review.append( np.zeros(300) )
+        count += 1
     
-    feature = np.array(feature)    
+    # Get feature
+    review = np.array(review).T
+    feature = np.dot(Wvals,review)
     
-    return np.amax(feature, axis=0) 
+    
+    return feature.flatten()
 
 
 """
 Generate features
 -----------------
-"""
+
 import pyprind
 pbar = pyprind.ProgBar(50)
 doc_stream = stream_docs(path='shuffled_movie_data.csv')
@@ -107,7 +140,7 @@ for _ in range(50):
     
     # Bar
     pbar.update()
-
+"""
 ##  ---------------------------------------------------------------------------
 
 
@@ -119,10 +152,27 @@ No-Lineal functions
 """
 def sigmoid(z):
     return 1/(1 + np.exp(-z))
+def sigmoid_deriv(z):
+    return np.multiply( sigmoid(z), 1 - sigmoid(z) )
+def tanh(z):
+    return np.tanh(z)
+def tanh_deriv(z):
+    tanhz = tanh(z)
+    return 1 - tanhz*tanhz
+def ReLU(z):
+    return np.multiply( int(z>=0), z )
+def ReLU_deriv(z):
+    return int(z>=0)
+def SELU(z):
+    neg = np.multiply( int(z< 0), 1.758094*( np.exp(z) - 1 ) )
+    pos = np.multiply( int(z>=0), 1.0507  *         z        )
+    return neg + pos
+def SELU_deriv(z):
+    return np.multiply( int(z<0), 1.758094*np.exp(z) ) + 1.0507*int(z>=0)
 def softmax(z):
     return np.exp(z)/np.sum(np.exp(z))
-def sigmoid_deriv(z):
-    return sigmoid(z)*(1-sigmoid(z))
+
+
 
 
 def initialize_he(D, K):
@@ -138,8 +188,8 @@ def feedforward(w, x):
     
     # Layers
     z1 = np.dot( x[np.newaxis,:], w[0] )
-    z2 = np.dot( sigmoid(z1)    , w[1] )
-    z3 = np.dot( sigmoid(z2)    , w[2] )
+    z2 = np.dot( tanh(z1)    , w[1] ) # sigmoid
+    z3 = np.dot( tanh(z2)    , w[2] ) # sigmoid
 
     out = {"z1" : z1,
            "z2" : z2,
@@ -156,24 +206,24 @@ def backpropagation(w, x, y, z, learning_rate):
 
     w1 = w[0]; w2 = w[1]; w3 = w[2];
     
-    a1 = sigmoid(z["z1"]).T
-    a2 = sigmoid(z["z2"]).T
+    a1 = tanh(z["z1"]).T
+    a2 = tanh(z["z2"]).T
     a3 = sigmoid(z["z3"]).T
     
     # Layer 3
-    mod_a3 = np.multiply( a3, 1-a3 )
-    delta3 = np.multiply( a3 - y , mod_a3 )
+    # mod_a3 = sigmoid_deriv(z["z3"]).T # np.multiply( a3, 1-a3 )
+    delta3 = a3 - y #np.multiply( a3 - y , mod_a3 )
     gradW3 = np.dot(a2,delta3.T)
     w3 = w3 - learning_rate*gradW3
     
     # Layer 2
-    mod_a2 = np.multiply( a2, 1-a2 )
+    mod_a2 = tanh_deriv(z["z2"]).T # np.multiply( a2, 1-a2 )
     delta2 = np.multiply( np.dot(w3,delta3) , mod_a2 )
     gradW2 = np.dot(a1,delta2.T)
     w2 = w2 - learning_rate*gradW2
     
     # Layer 1
-    mod_a1 = np.multiply( a1, 1-a1 )
+    mod_a1 = tanh_deriv(z["z1"]).T # np.multiply( a1, 1-a1 )
     delta1 = np.multiply( np.dot(w2,delta2) , mod_a1 )
     gradW1 = np.dot(x[:,np.newaxis],delta1.T)
     w1 = w1 - learning_rate*gradW1
@@ -188,7 +238,7 @@ Multilayer Perceptron
 ---------------------
 """
 def MLP(x_train, y_train, num_iterations = 40000, 
-                          learning_rate  = 0.001,
+                          learning_rate  = 0.01,
                           n_input  = 50, 
                           n_hidden = 10):
     import random
