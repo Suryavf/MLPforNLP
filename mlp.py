@@ -7,6 +7,7 @@ Created on Tue Nov  6 15:51:50 2018
 """
 import numpy  as np
 import pandas as pd
+import pyprind
 import re
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
@@ -71,14 +72,13 @@ def get_minibatch(doc_stream, size):
 
 
 
-
 doc_stream = stream_docs(path='shuffled_movie_data.csv')
 x_, y_ = get_minibatch(doc_stream, size=50000)
 count_words = [len(preprocessing(w).split())  for w in x_]
 import seaborn as sns
 sns.distplot(count_words,bins=100)
 
-threshold = np.percentile(count_words,90)
+threshold_words = np.percentile(count_words,80)
 
 
 
@@ -101,49 +101,19 @@ def featuresExtraction(text):
             review.append( words[w] )
             count += 1
         
-        if not count<threshold:
+        if not count<threshold_words:
             break
             
-    while count<threshold:
+    while count<threshold_words:
         review.append( np.zeros(300) )
         count += 1
     
     # Get feature
     review = np.array(review).T
-    feature = np.dot(Wvals,review)
+    #feature = np.dot(Wvals,review)
     
     
-    return feature.flatten()
-
-
-"""
-Generate features
------------------
-
-import pyprind
-pbar = pyprind.ProgBar(50)
-doc_stream = stream_docs(path='shuffled_movie_data.csv')
-
-print('\nGenerate Features')
-x = list()
-y = list()
-for _ in range(50):
-    # Getting
-    x_raw, y_raw = get_minibatch(doc_stream, size=1000)
-    
-    # Update features
-    features = [ featuresExtraction(preprocessing(text)) for text in x_raw ] 
-    x = x + features
-    
-    # Update out
-    y = y + y_raw
-    
-    # Bar
-    pbar.update()
-"""
-##  ---------------------------------------------------------------------------
-
-
+    return review.flatten() #np.amax(feature, axis=1) #feature.flatten()
 
 
 """
@@ -175,10 +145,9 @@ def softmax(z):
 
 
 
-def initialize_he(D, K):
-    W = np.random.randn(K,D)*np.sqrt(2/K)
-    b = np.random.randn(1,K)*np.sqrt(2/K)
-    return W, b
+def initialize_he(n_input, n_output):    
+    return np.random.randn(int(n_input),n_output )*np.sqrt( 2/(n_input+n_output) )
+
 
 """
 Feedforward
@@ -188,8 +157,8 @@ def feedforward(w, x):
     
     # Layers
     z1 = np.dot( x[np.newaxis,:], w[0] )
-    z2 = np.dot( tanh(z1)    , w[1] ) # sigmoid
-    z3 = np.dot( tanh(z2)    , w[2] ) # sigmoid
+    z2 = np.dot( sigmoid(z1)    , w[1] ) # sigmoid
+    z3 = np.dot( sigmoid(z2)    , w[2] ) # sigmoid
 
     out = {"z1" : z1,
            "z2" : z2,
@@ -206,65 +175,30 @@ def backpropagation(w, x, y, z, learning_rate):
 
     w1 = w[0]; w2 = w[1]; w3 = w[2];
     
-    a1 = tanh(z["z1"]).T
-    a2 = tanh(z["z2"]).T
+    a1 = sigmoid(z["z1"]).T
+    a2 = sigmoid(z["z2"]).T
     a3 = sigmoid(z["z3"]).T
     
     # Layer 3
-    # mod_a3 = sigmoid_deriv(z["z3"]).T # np.multiply( a3, 1-a3 )
-    delta3 = a3 - y #np.multiply( a3 - y , mod_a3 )
+    mod_a3 = sigmoid_deriv(z["z3"]).T # np.multiply( a3, 1-a3 )
+    delta3 = np.multiply( a3 - y , mod_a3 )
     gradW3 = np.dot(a2,delta3.T)
     w3 = w3 - learning_rate*gradW3
     
     # Layer 2
-    mod_a2 = tanh_deriv(z["z2"]).T # np.multiply( a2, 1-a2 )
+    mod_a2 = sigmoid_deriv(z["z2"]).T # np.multiply( a2, 1-a2 )
     delta2 = np.multiply( np.dot(w3,delta3) , mod_a2 )
     gradW2 = np.dot(a1,delta2.T)
     w2 = w2 - learning_rate*gradW2
     
     # Layer 1
-    mod_a1 = tanh_deriv(z["z1"]).T # np.multiply( a1, 1-a1 )
+    mod_a1 = sigmoid_deriv(z["z1"]).T # np.multiply( a1, 1-a1 )
     delta1 = np.multiply( np.dot(w2,delta2) , mod_a1 )
     gradW1 = np.dot(x[:,np.newaxis],delta1.T)
     w1 = w1 - learning_rate*gradW1
     
     w[0] = w1; w[1] = w2; w[2] = w3;
     
-    return w
-
-
-"""
-Multilayer Perceptron
----------------------
-"""
-def MLP(x_train, y_train, num_iterations = 40000, 
-                          learning_rate  = 0.01,
-                          n_input  = 50, 
-                          n_hidden = 10):
-    import random
-    
-    # Parameters
-    n_samples  = len(x_train   )
-    n_features = len(x_train[0])
-    
-    # Inicialize
-    w = list()
-    w.append( np.random.randn(n_features+1,n_input )*np.sqrt(6/(n_features+1+n_input )) )
-    w.append( np.random.randn(n_input     ,n_hidden)*np.sqrt(6/(n_input     +n_hidden)) )
-    w.append( np.random.randn(n_hidden    ,       1)*np.sqrt(6/(n_hidden    +       1)) )
-    
-    # Train Loop
-    for _ in range(n_samples):
-        
-        # Random selection
-        n = round(random.uniform(0, n_samples-1))
-        x = np.append([1],x_train[n])   # add bias
-        y = y_train[n]
-        
-        # Train
-        z = feedforward(w, x)
-        w = backpropagation(w, x, y, z, learning_rate)
-        
     return w
 
 
@@ -275,14 +209,10 @@ Prediction
 """
 def predict(w, x_test):
     
-    n_samples = len(x_test)
-    y_pred    = list()
-    
-    for n in range(n_samples):
-        x = np.append([1], x_test[n])   # add bias
-        z = feedforward(w, x)
-        a = sigmoid(z["z3"])
-        y_pred.append( int(a>0.5) )
+    x = np.append([1], x_test)   # add bias
+    z = feedforward(w, x)
+    a = sigmoid(z["z3"])
+    y_pred = int(a>0.5) 
     
     return y_pred
 
@@ -292,57 +222,74 @@ def predict(w, x_test):
 Train LR
 --------
 """
-from sklearn.model_selection import KFold
+import random
+doc_stream = stream_docs(path='shuffled_movie_data.csv')
 
-print('\nTrain Logistic Regression')
-kf = KFold(n_splits=8)  
-pbar = pyprind.ProgBar(8)
+# Parameters
+n_features    = threshold_words*300#len(words)#*threshold_words
+learning_rate =  0.01
+porc_data     =   0.2
+n_epoch       =   300
+n_input       =     5
+n_hidden      =     3
+n_train       = 40000
+n_test        = 10000
 
-prediction = list()
+# Train/test data
+x_train, y_train = get_minibatch(doc_stream, size=n_train)
+x_test , y_test  = get_minibatch(doc_stream, size=n_test )
 
-for train, test in kf.split(x):
+# Inicialize
+w = list()
+w.append( initialize_he(n_features+1,n_input ) )
+w.append( initialize_he(n_input     ,n_hidden) )
+w.append( initialize_he(n_hidden    ,       1) )
+accuracy = list()
+
+# Run epoch
+for _ in range(n_epoch):
     
-    # Select
-    x_train = [ x[i] for i in train ]
-    y_train = [ y[i] for i in train ]
-    
-    x_test = [ x[i] for i in test ]
-    y_test = [ y[i] for i in test ]
-    
-    # Run train
-    w = MLP(x_train, y_train)
-    
+    #
+    # Train one epoch
+    # ---------------
+    pbar = pyprind.ProgBar(n_train*porc_data)
+    for __ in range(int(n_train*porc_data)):
+        
+        n = round(random.uniform(0, n_train-1))
+        
+        # Get features
+        x = featuresExtraction(preprocessing(x_train[n]))
+        x = np.append([1],x)   # add bias
+        y = y_train[n]
+        
+        # Train
+        z = feedforward(w, x)
+        w = backpropagation(w, x, y, z, learning_rate)
+        
+        # Update bar
+        pbar.update()
+
+
+    #
     # Run test
-    y_pred = predict(w, x_test )
-    
-    prediction.append({'Real'      : y_test,
-                       'Prediction': y_pred})
-    
-    # Bar
-    pbar.update()
-
-
-"""
-Result Analysis
----------------
-"""
-from sklearn.metrics import roc_curve
-
-print('\nResult Analysis')
-accuracy   = list()
-for p in prediction:
-    fpr, tpr, thresholds =roc_curve(p['Real'], p['Prediction'])
-    
-    fpr_tpr = [ np.abs(a-b) for a,b in zip(fpr,tpr) ]
-    threshold = thresholds[ fpr_tpr.index(max(fpr_tpr)) ]
-    
-    y_pred = [ int(score>threshold) for score in p['Prediction']]
+    # --------
     acc = 0
-    for real,pred in zip(y_pred,p['Real']):
-        acc = acc + int( real == pred )
-    
-    accuracy.append( acc*100/len(y_pred) )
-
-
-
-
+    pbar = pyprind.ProgBar(n_test*porc_data)
+    for __ in range(int(n_test*porc_data)):
+        
+        n = round(random.uniform(0, n_test-1))
+        
+        # Get features
+        x = featuresExtraction(preprocessing(x_test[n]))
+        
+        # Prediction
+        y_pred = predict(w,x)
+        acc += int(y_pred == y_test[n])
+        
+        # Update bar
+        pbar.update()
+        
+    acc = acc*100/(n_test*porc_data)
+    print('\n')
+    print('\nEpoch ',_,'\tTest Accuracy: ',acc,'%')
+    accuracy.append(acc)
