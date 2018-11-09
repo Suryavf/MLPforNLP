@@ -8,6 +8,7 @@ Created on Tue Nov  6 15:51:50 2018
 import numpy  as np
 import pandas as pd
 import pyprind
+import random
 import re
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
@@ -82,7 +83,6 @@ threshold_words = np.percentile(count_words,80)
 """
 
 
-
 ##  ---------------------------------------------------------------------------   
 
 
@@ -110,10 +110,8 @@ def featuresExtraction(text):
     
     # Get feature
     review = np.array(review).T
-    #feature = np.dot(Wvals,review)
     
-    
-    return review.flatten() #np.amax(feature, axis=1) #feature.flatten()
+    return review.flatten() 
 
 
 """
@@ -148,7 +146,6 @@ def funDeriv(fun):
     if fun ==    ReLU: return    ReLU_deriv;
     if fun ==    SELU: return    SELU_deriv;
 
-
 def initialize_he(n_input, n_output):    
     return np.random.randn(int(n_input),n_output )*np.sqrt( 2/(n_input+n_output) )
 
@@ -157,48 +154,37 @@ def initialize_he(n_input, n_output):
 Feedforward
 -----------
 """
-def feedforward(w, x,
-                hiddenFunc = sigmoid,
-                outFunc    = sigmoid,
-                layers     = 3):
-    """
+def feedforward(w, x,actFunc = sigmoid):
     z = list()
+    layers = len(w)
     for n in range(layers):     
         # Activation
         if n == 0: a = x[np.newaxis,:];
-        else     : a = hiddenFunc(z[n-1]);
+        else     : a = actFunc(z[n-1]);
         
         z.append( np.dot( a , w[n] ) )
-    """
     
-    # Layers
-    z1 = np.dot( x[np.newaxis,:], w[0] )
-    z2 = np.dot( hiddenFunc(z1) , w[1] ) # sigmoid
-    z3 = np.dot( hiddenFunc(z2) , w[2] ) # sigmoid
-
-    out = {"z1" : z1,
-           "z2" : z2,
-           "z3" : z3}
-    
-    return out
+    return z
 
 
 """
 Backpropagation
 ---------------
 """
-def layer(  w,derivLoss,
-                  a_int,
-                      z,
-          learning_rate,
-             reg_lambda,
-                actFunc):
+def layer(w,derivLoss,a_int,z,
+                learning_rate,
+                   reg_lambda,
+                      actFunc):
     
     # Derivada
     actFunc_deriv = funDeriv(actFunc)
     
     delta = np.multiply( derivLoss , actFunc_deriv(z).T )
     gradW = np.dot(a_int,delta.T) + reg_lambda*w
+    
+    if reg_lambda > 0.0:
+        gradW += reg_lambda*w
+    
     w = w - learning_rate*gradW
     
     return w,delta
@@ -206,20 +192,17 @@ def layer(  w,derivLoss,
 
 def backpropagation(w, x, y, z, 
                     learning_rate,
-                    reg_lambda = 0.01   ,
+                    reg_lambda = 0.00   ,
                     hiddenFunc = sigmoid,
-                    outFunc    = sigmoid,
-                    layers     = 3):
-    # Parameters
-    w1 = w[0]; w2 = w[1]; w3 = w[2];
-    
+                    outFunc    = sigmoid):
+    # Layers
+    layers = len(w)
     
     # Activation function
     a = list()
     a.append(   x[:,np.newaxis]   )
-    a.append(hiddenFunc(z["z1"]).T)
-    a.append(hiddenFunc(z["z2"]).T)
-    a.append(hiddenFunc(z["z3"]).T)
+    for n in range(layers): 
+        a.append(hiddenFunc(z[n]).T)
     
     # Train layers
     delta = 0
@@ -228,7 +211,7 @@ def backpropagation(w, x, y, z,
         # Out/Hidden layer
         if n == (layers-1):
             actFun = outFunc
-            derivLoss = a[n]-y
+            derivLoss = a[n+1]-y
         else:
             actFun = hiddenFunc
             derivLoss = np.dot(w[n+1],delta)
@@ -238,13 +221,9 @@ def backpropagation(w, x, y, z,
     
     
     """
-    w3,delta = leyerBackpropagation(w3,    (a3   -   y), a2, z["z3"],
-                                    learning_rate,reg_lambda,outFunc)
-    w2,delta = leyerBackpropagation(w2,np.dot(w3,delta), a1, z["z2"],
-                                    learning_rate,reg_lambda,hiddenFunc)
-    w1,delta = leyerBackpropagation(w1,np.dot(w3,delta), a0, z["z2"],
-                                    learning_rate,reg_lambda,hiddenFunc)
-    """
+    
+    # Parameters
+    w1 = w[0]; w2 = w[1]; w3 = w[2];
     
     if hiddenFunc == sigmoid: hiddenFunc_deriv = sigmoid_deriv;
     if hiddenFunc ==    tanh: hiddenFunc_deriv =    tanh_deriv;
@@ -280,7 +259,7 @@ def backpropagation(w, x, y, z,
     w1 = w1 - learning_rate*gradW1
     
     w[0] = w1; w[1] = w2; w[2] = w3;
-    
+    """
     return w
 
 
@@ -294,18 +273,19 @@ def predict(w, x_test,
             outFunc    = sigmoid):
     
     x = np.append([1], x_test)   # add bias
-    z = feedforward(w, x,hiddenFunc,outFunc)
-    a = outFunc(z["z3"])
-    y_pred = int(a>0.5) 
+    z = feedforward(w, x,hiddenFunc)
+    a = outFunc(z[-1])  # z["z3"]
     
-    return y_pred
-
-
+    if outFunc == sigmoid: return int(a>0.5) ;
+    if outFunc ==    tanh: return int(a>0.0) ;
+    if outFunc ==    ReLU: return int(a>0.0) ;
+    if outFunc ==    SELU: return int(a>0.0) ;
+    else                 : return -1;
 
 """
-Train LR
---------
-"""
+Train MLP
+---------
+
 import random
 doc_stream = stream_docs(path='shuffled_movie_data.csv')
 
@@ -316,7 +296,7 @@ reg_lambda    =    0.1
 porc_data     =    0.2
 n_epoch       =     30
 n_input       =      5
-n_hidden      =      3
+n_hidden      =      5
 n_train       =  40000
 n_test        =  10000
 
@@ -342,7 +322,7 @@ for _ in range(n_epoch):
     # ---------------
     pbar = pyprind.ProgBar(n_train*porc_data)
     for __ in range(int(n_train*porc_data)):
-        
+        # Random changing
         n = round(random.uniform(0, n_train-1))
         
         # Get features
@@ -351,11 +331,14 @@ for _ in range(n_epoch):
         y = y_train[n]
         
         # Train
-        z = feedforward(w, x, hidFunc, outFunc)
-        w = backpropagation(w, x, y, z,learning_rate, reg_lambda, hidFunc, outFunc)
+        z = feedforward(w, x, hidFunc)
+        w = backpropagation(w, x, y, z,
+                            learning_rate, reg_lambda, 
+                            hidFunc, outFunc)
         
         # Update bar
         pbar.update()
+        
 
 
     #
@@ -381,3 +364,90 @@ for _ in range(n_epoch):
     print('\n')
     print('\nEpoch ',_+1,'\tTest Accuracy: ',acc,'%')
     accuracy.append(acc)
+"""
+
+def trainMLP(w,learning_rate,reg_lambda,hiddenFunc,outFunc,verbose=False):
+    # Parameters
+    n_features    = threshold_words*300
+    porc_data     =    0.2
+    n_epoch       =     30
+    n_train       =  40000
+    n_test        =  10000
+    
+    doc_stream = stream_docs(path='shuffled_movie_data.csv')
+    accuracy = list()
+    
+    # Train/test data
+    x_train, y_train = get_minibatch(doc_stream, size=n_train)
+    x_test , y_test  = get_minibatch(doc_stream, size=n_test )
+    
+    # Run epoch
+    for _ in range(n_epoch):
+    
+        """ Train one epoch """
+        if verbose: pbar = pyprind.ProgBar(n_train*porc_data)
+        for __ in range(int(n_train*porc_data)):
+            # Random changing
+            n = round(random.uniform(0, n_train-1))
+
+            # Get features
+            x = featuresExtraction(preprocessing(x_train[n]))
+            x = np.append([1],x)   # add bias
+            y = y_train[n]
+
+            # Train
+            z = feedforward(w, x, hiddenFunc)
+            w = backpropagation(w, x, y, z,
+                                learning_rate, reg_lambda, 
+                                hiddenFunc, outFunc)
+            # Update bar
+            if verbose: pbar.update()
+
+        """ Run test """
+        acc = 0
+        if verbose: pbar = pyprind.ProgBar(n_test*porc_data)
+        for __ in range(int(n_test*porc_data)):
+            # Random changing
+            n = round(random.uniform(0, n_test-1))
+
+            # Get features
+            x = featuresExtraction(preprocessing(x_test[n]))
+
+            # Prediction
+            y_pred = predict(w,x, hiddenFunc, outFunc)
+            acc += int(y_pred == y_test[n])
+
+            # Update bar
+            if verbose: pbar.update()
+
+        acc = acc*100/(n_test*porc_data)
+        if verbose: print('\n')
+        if verbose: print('\nEpoch ',_+1,'\tTest Accuracy: ',acc,'%')
+        accuracy.append(acc)
+        
+    return accuracy
+
+def addLayer(w,n_int,n_out):
+    w.append(initialize_he(n_int,n_out))
+    
+    
+"""z
+Testing
+-------
+"""
+n_features = threshold_words*300
+
+# Parameters
+learning_rate =  0.01
+reg_lambda    =   0.1
+
+# Define layers
+w = list()
+addLayer(w,n_features+1,5)
+addLayer(w,5,3); addLayer(w,3,1)
+
+acc = trainMLP(w,learning_rate,reg_lambda,ReLU,sigmoid,verbose=True)
+
+#ReLU
+#SELU
+
