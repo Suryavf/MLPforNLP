@@ -439,12 +439,12 @@ n_features = threshold_words*300
 
 # Parameters
 learning_rate =  0.01
-reg_lambda    =   0.1
+reg_lambda    =   0.00001
 
 # Define layers
 w = list()
 addLayer(w,n_features+1,5)
-addLayer(w,5,3); addLayer(w,3,1)
+addLayer(w,5,5); addLayer(w,5,1)
 
 acc = trainMLP(w,learning_rate,reg_lambda,ReLU,sigmoid,verbose=True)
 
